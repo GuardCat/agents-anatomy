@@ -8,3 +8,33 @@ wheels/
 
 # Virtual environments
 .venv
+
+### --- Secrets & Configs --- ###
+.env
+.env.local
+.env.*
+*.secret
+secrets.toml
+
+### --- Editors --- ###
+# Vim
+*.swp
+*.swo
+Session.vim
+.netrwhist
+undo/
+tags
+
+# Code OSS / VS Code
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+.directory
+*.tmp
+
+### --- Tools --- ###
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
