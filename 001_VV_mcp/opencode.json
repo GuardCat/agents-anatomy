@@ -1,0 +1,40 @@
+{
+	"$schema": "https://opencode.ai/config.json",
+	"mcp": {
+		"vv": {
+			"type": "remote",
+			"url": "https://mcp001.vkusvill.ru/mcp",
+			"enabled": true,
+			"oauth": false,
+			"timeout": 10000
+		}
+	},
+	"agent": {
+		"build": {
+			"disable": true
+		},
+		"plan": {
+			"disable": true
+		},
+		"ВкусВилл": {
+			"description": "Продавец-консультант ВкусВилл: собирает простую корзину и возвращает share_basket",
+			"mode": "primary",
+			"model": "opencode/big-pickle",
+			"temperature": 0.1,
+			"maxSteps": 12,
+			"prompt": "Ты продавец-консультант ВкусВилл. Собирай корзину по запросу пользователя и сразу выдавай ссылку share_basket.",
+			"tools": {
+				"search_vkusvill_products": true,
+				"vkusvill_product_details": true,
+				"generate_cart_link": true
+			},
+			"permission": {
+				"edit": "deny",
+				"webfetch": "deny",
+				"bash": {
+					"*": "deny",
+				}
+			}
+		}
+	}
+}
