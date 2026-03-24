@@ -8,81 +8,96 @@
 import sys
 import os
 from docx import Document
-from docx.opc.constants import RELATIONSHIP_TYPE as RT
+from docx.oxml.ns import qn
+from docx.table import Table
 
-def parse_docx(file_path, output_dir="extracted_images"):
+def parse_docx(file_path, output_dir="extracted_media"):
     try:
         doc = Document(file_path)
     except Exception as e:
-        print(f"Ошибка чтения файла: {e}")
+        print(f"Ошибка чтения: {e}")
         return
 
-    # Создаем директорию для картинок, если её нет
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
     print(f"# Анализ документа: {file_path}\n")
 
-    print("## Текст")
-    for p in doc.paragraphs:
-        if p.text.strip():
-            print(p.text)
+    img_counter = 1
 
-    print("\n## Ссылки")
-    rels = doc.part.rels
-    for rel in rels.values():
-        if rel.reltype == RT.HYPERLINK:
-            print(f"- {rel.target_ref}")
-
-    print("\n## Изображения")
-    for idx, shape in enumerate(doc.inline_shapes):
-        w = shape.width.cm if shape.width else 0
-        h = shape.height.cm if shape.height else 0
-        
+    def process_drawing(drawing_element):
+        """Извлекает картинку, сохраняет ее и возвращает Markdown-тег"""
+        nonlocal img_counter
         try:
-            # Извлекаем ID связи (rId) для текущей картинки
-            blip = shape._inline.graphic.graphicData.pic.blipFill.blip
-            rId = blip.embed
+            blips = drawing_element.xpath('.//a:blip')
+            if not blips:
+                return ""
             
-            # Получаем сам файл картинки из внутренностей docx
-            image_part = doc.part.related_parts[rId]
+            embed_id = blips[0].get(qn('r:embed'))
+            if not embed_id or embed_id not in doc.part.related_parts:
+                return ""
             
-            # Определяем формат (jpeg, png и т.д.)
-            ext = image_part.content_type.split('/')[-1]
-            if ext == 'jpeg': ext = 'jpg'
+            image_part = doc.part.related_parts[embed_id]
+            ext = image_part.content_type.split('/')[-1].replace('jpeg', 'jpg')
+            fname = f"img_{img_counter}.{ext}"
+            fpath = os.path.join(output_dir, fname)
             
-            # Формируем путь и сохраняем
-            filename = f"image_{idx + 1}.{ext}"
-            filepath = os.path.join(output_dir, filename)
-            
-            with open(filepath, "wb") as f:
+            with open(fpath, "wb") as f:
                 f.write(image_part.blob)
-                
-            print(f"- Картинка {idx + 1}: {w:.2f} см x {h:.2f} см. Сохранена в: `{filepath}`")
+            
+            extents = drawing_element.xpath('.//wp:extent')
+            dim_str = ""
+            if extents:
+                cx = int(extents[0].get('cx', 0)) / 360000
+                cy = int(extents[0].get('cy', 0)) / 360000
+                dim_str = f" ({cx:.2f}x{cy:.2f} см)"
+            
+            placeholder = f"![Изображение {img_counter}{dim_str}]({fpath})"
+            img_counter += 1
+            return placeholder
         except Exception as e:
-            print(f"- Картинка {idx + 1}: {w:.2f} см x {h:.2f} см. Ошибка извлечения файла: {e}")
+            return f"[Ошибка извлечения медиа: {e}]"
 
-    print("\n## Таблицы")
-    for t_idx, table in enumerate(doc.tables):
-        print(f"\n### Таблица {t_idx + 1}")
-        for r_idx, row in enumerate(table.rows):
-            row_text = [cell.text.replace('\n', ' ').strip() for cell in row.cells]
-            print("| " + " | ".join(row_text) + " |")
-            if r_idx == 0:
-                print("|" + "|".join(["---"] * len(row.cells)) + "|")
+    # Обходим все блочные элементы документа строго в порядке их следования
+    for block in doc.element.body:
+        
+        # ЕСЛИ ЭТО АБЗАЦ
+        if block.tag.endswith('p'):
+            para_text = ""
+            for child in block:
+                if child.tag.endswith('r'):
+                    for run_child in child:
+                        if run_child.tag.endswith('t') and run_child.text:
+                            para_text += run_child.text
+                        elif run_child.tag.endswith('drawing'):
+                            para_text += process_drawing(run_child)
+                elif child.tag.endswith('hyperlink'):
+                    rel_id = child.get(qn('r:id'))
+                    url = doc.part.rels[rel_id].target_ref if rel_id in doc.part.rels else ""
+                    link_text = "".join([t.text for t in child.xpath('.//w:t') if t.text])
+                    para_text += f"[{link_text}]({url})" if url else link_text
+
+            full_text = para_text.strip()
+            if full_text:
+                print(full_text + "\n")
+
+        # ЕСЛИ ЭТО ТАБЛИЦА
+        elif block.tag.endswith('tbl'):
+            table = Table(block, doc._body)
+            for r_idx, row in enumerate(table.rows):
+                # Извлекаем текст из ячеек, убирая переносы строк для Markdown-формата
+                cells = [c.text.replace('\n', ' ').strip() for c in row.cells]
+                print("| " + " | ".join(cells) + " |")
+                
+                # Добавляем разделитель Markdown-таблицы после первой строки
+                if r_idx == 0:
+                    print("|" + "|".join(["---"] * len(cells)) + "|")
+            print() # Пустая строка после таблицы для корректного рендеринга Markdown
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
-        file_path = sys.argv[1]
-        
-        # По умолчанию создаем папку с именем документа + _images
-        base_name = os.path.splitext(os.path.basename(file_path))[0]
-        out_dir = f"{base_name}_images"
-        
-        # Если передан второй аргумент, используем его
-        if len(sys.argv) > 2:
-            out_dir = sys.argv[2]
-            
-        parse_docx(file_path, out_dir)
+        path = sys.argv[1]
+        out = sys.argv[2] if len(sys.argv) > 2 else f"{os.path.splitext(os.path.basename(path))[0]}_media"
+        parse_docx(path, out)
     else:
-        print("Использование: uv run docx_reader.py <путь_к_docx> [путь_к_папке_для_картинок]")
+        print("Использование: docx_reader <путь_к_файлу> [папка_сохранения]")
